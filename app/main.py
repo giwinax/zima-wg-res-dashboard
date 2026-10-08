@@ -143,6 +143,23 @@ async def wg_get_clients():
                 return None, "bad_json"
 
 
+@app.get("/api/wg-debug")
+async def wg_debug():
+    async with httpx.AsyncClient(timeout=5) as client:
+        r = await client.post(f"{WG_URL}/api/session", json={"password": WG_PASSWORD})
+        return {
+            "wg_url": WG_URL,
+            "login_status": r.status_code,
+            "login_body": r.text[:300],
+            "set_cookie_header": r.headers.get("set-cookie"),
+            "raw_cookie_jar": [
+                {"name": c.name, "value": c.value[:20] if c.value else c.value, "domain": c.domain, "path": c.path}
+                for c in r.cookies.jar
+            ],
+            "r_cookies_get": r.cookies.get("connect.sid"),
+        }
+
+
 @app.get("/api/wg")
 async def wg_clients():
     data, err = await wg_get_clients()
