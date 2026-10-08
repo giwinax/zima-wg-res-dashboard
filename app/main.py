@@ -8,6 +8,7 @@ import httpx
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.types import Scope
 
 # --- host /proc + /sys redirect (container runs with pid:host, host /proc and /sys bind-mounted) ---
 HOST_PROC = os.environ.get("HOST_PROC", "/proc")
@@ -182,6 +183,17 @@ def _is_recent(iso_ts: str, window_sec: int = 150) -> bool:
 
 
 # ---------------- static frontend ----------------
+# No default Cache-Control -> browsers use heuristic caching and can keep
+# serving a stale index.html/app.js for a long time after a deploy, with no
+# way to tell without a hard refresh. Force revalidation on every request.
+
+
+class NoCacheStaticFiles(StaticFiles):
+    async def get_response(self, path: str, scope: Scope):
+        response = await super().get_response(path, scope)
+        response.headers["Cache-Control"] = "no-cache, must-revalidate"
+        return response
+
 
 static_dir = Path(__file__).parent / "static"
-app.mount("/", StaticFiles(directory=str(static_dir), html=True), name="static")
+app.mount("/", NoCacheStaticFiles(directory=str(static_dir), html=True), name="static")
