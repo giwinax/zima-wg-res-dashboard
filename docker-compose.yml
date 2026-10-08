@@ -1,0 +1,16 @@
+services:
+  zima-dash:
+    image: ghcr.io/giwinax/zima-dash:latest
+    container_name: zima-dash
+    ports:
+      - "8090:8090"
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+    environment:
+      - HOST_PROC=/host/proc
+      - HOST_SYS=/host/sys
+      - NET_IFACE=eth0
+      - WG_EASY_URL=http://192.168.8.128:51821
+      - WG_EASY_PASSWORD=changeme
+    restart: unless-stopped
