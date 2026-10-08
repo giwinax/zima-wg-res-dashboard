@@ -124,7 +124,10 @@ async def wg_get_clients():
         async with httpx.AsyncClient(timeout=5) as client:
             cookies = {"connect.sid": _wg_cookie} if _wg_cookie else {}
             r = await client.get(f"{WG_URL}/api/wireguard/client", cookies=cookies)
-            if r.status_code == 401 or r.status_code == 403:
+            # This wg-easy version returns 500 (not 401/403) for an
+            # unauthenticated/expired-session request, so any non-2xx on the
+            # first attempt is treated as "need to (re)login", not just 401/403.
+            if r.status_code // 100 != 2:
                 cookie = await wg_login(client)
                 if not cookie:
                     return None, "auth_failed"
