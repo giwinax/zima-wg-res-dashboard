@@ -96,7 +96,46 @@ async function pollSystem() {
   }
 }
 
-let statusSortDir = -1; // -1: online сверху (по умолчанию), 1: offline сверху
+// Сортировка таблицы WireGuard-клиентов. По умолчанию — по статусу, online сверху.
+let sortKey = "status";
+let sortDir = -1; // -1 = по умолчанию для ключа (см. sortValue), 1 = обратный
+
+function sortValue(c, key) {
+  switch (key) {
+    case "name": return c.name || "";
+    case "status": return c.online ? 1 : 0;
+    case "address": return c.address || "";
+    case "handshake": return c.last_handshake ? new Date(c.last_handshake).getTime() : -Infinity;
+    case "rx": return c.rx || 0;
+    case "tx": return c.tx || 0;
+    default: return "";
+  }
+}
+
+function applySort(clients) {
+  const key = sortKey;
+  const dir = sortDir;
+  const sorted = [...clients].sort((a, b) => {
+    const va = sortValue(a, key), vb = sortValue(b, key);
+    let cmp;
+    if (typeof va === "string") cmp = va.localeCompare(vb);
+    else cmp = va < vb ? -1 : va > vb ? 1 : 0;
+    if (cmp !== 0) return cmp * dir;
+    return (a.name || "").localeCompare(b.name || "");
+  });
+  return sorted;
+}
+
+function updateSortArrows() {
+  document.querySelectorAll("th.sortable").forEach(th => {
+    const arrow = th.querySelector(".sort-arrow");
+    if (th.dataset.sort === sortKey) {
+      arrow.textContent = sortDir === 1 ? "▲" : "▼";
+    } else {
+      arrow.textContent = "";
+    }
+  });
+}
 
 async function pollWg() {
   try {
@@ -115,11 +154,9 @@ async function pollWg() {
         (Date.now() - new Date(c.last_handshake).getTime()) / 1000 < 150;
       return { ...c, online };
     });
-    withStatus.sort((a, b) => {
-      if (a.online !== b.online) return a.online ? statusSortDir : -statusSortDir;
-      return a.name.localeCompare(b.name);
-    });
-    tbody.innerHTML = withStatus.map(c => `<tr>
+    const sorted = applySort(withStatus);
+    updateSortArrows();
+    tbody.innerHTML = sorted.map(c => `<tr>
         <td>${c.name}</td>
         <td><span class="badge ${c.online ? "online" : "offline"}">${c.online ? "online" : "offline"}</span></td>
         <td class="mono">${c.address || "—"}</td>
@@ -138,10 +175,18 @@ function tick() {
   pollWg();
 }
 
-document.getElementById("th-status").addEventListener("click", () => {
-  statusSortDir *= -1;
-  document.getElementById("sort-arrow").textContent = statusSortDir === -1 ? "▼" : "▲";
-  pollWg();
+document.querySelectorAll("th.sortable").forEach(th => {
+  th.addEventListener("click", () => {
+    const key = th.dataset.sort;
+    if (sortKey === key) {
+      sortDir *= -1;
+    } else {
+      sortKey = key;
+      // статус и handshake по умолчанию "больше/новее сверху", остальное - по возрастанию
+      sortDir = (key === "status" || key === "handshake") ? -1 : 1;
+    }
+    pollWg();
+  });
 });
 
 tick();
