@@ -96,6 +96,8 @@ async function pollSystem() {
   }
 }
 
+let statusSortDir = -1; // -1: online сверху (по умолчанию), 1: offline сверху
+
 async function pollWg() {
   try {
     const r = await fetch("/api/wg");
@@ -108,18 +110,23 @@ async function pollWg() {
       tbody.innerHTML = '<tr><td colspan="6" class="mono">нет клиентов</td></tr>';
       return;
     }
-    tbody.innerHTML = d.clients.map(c => {
+    const withStatus = d.clients.map(c => {
       const online = c.enabled && c.last_handshake &&
         (Date.now() - new Date(c.last_handshake).getTime()) / 1000 < 150;
-      return `<tr>
+      return { ...c, online };
+    });
+    withStatus.sort((a, b) => {
+      if (a.online !== b.online) return a.online ? statusSortDir : -statusSortDir;
+      return a.name.localeCompare(b.name);
+    });
+    tbody.innerHTML = withStatus.map(c => `<tr>
         <td>${c.name}</td>
-        <td><span class="badge ${online ? "online" : "offline"}">${online ? "online" : "offline"}</span></td>
+        <td><span class="badge ${c.online ? "online" : "offline"}">${c.online ? "online" : "offline"}</span></td>
         <td class="mono">${c.address || "—"}</td>
         <td class="mono">${fmtAgo(c.last_handshake)}</td>
         <td class="mono">${fmtBytes(c.rx)}</td>
         <td class="mono">${fmtBytes(c.tx)}</td>
-      </tr>`;
-    }).join("");
+      </tr>`).join("");
   } catch (e) {
     const tbody = document.getElementById("wg-table");
     tbody.innerHTML = '<tr><td colspan="6" class="mono">ошибка wg-easy API</td></tr>';
@@ -130,6 +137,12 @@ function tick() {
   pollSystem();
   pollWg();
 }
+
+document.getElementById("th-status").addEventListener("click", () => {
+  statusSortDir *= -1;
+  document.getElementById("sort-arrow").textContent = statusSortDir === -1 ? "▼" : "▲";
+  pollWg();
+});
 
 tick();
 setInterval(tick, POLL_MS);

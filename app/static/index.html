@@ -133,6 +133,9 @@
   .badge.online { background: rgba(79,209,122,.12); color: var(--good); }
   .badge.offline { background: rgba(138,148,166,.12); color: var(--muted); }
   .mono { font-variant-numeric: tabular-nums; color: var(--muted); }
+  th.sortable { cursor: pointer; user-select: none; }
+  th.sortable:hover { color: var(--text); }
+  .sort-arrow { font-size: 10px; display: inline-block; }
   canvas { display: block; width: 100%; height: 48px; margin-top: 10px; }
   footer { margin-top: 20px; font-size: 12px; color: var(--muted); text-align: right; }
 </style>
@@ -177,7 +180,7 @@
 <div class="section-title">WireGuard клиенты</div>
 <table>
   <thead>
-    <tr><th>Имя</th><th>Статус</th><th>Адрес</th><th>Последний handshake</th><th>RX</th><th>TX</th></tr>
+    <tr><th>Имя</th><th id="th-status" class="sortable">Статус <span class="sort-arrow" id="sort-arrow">▼</span></th><th>Адрес</th><th>Последний handshake</th><th>RX</th><th>TX</th></tr>
   </thead>
   <tbody id="wg-table"><tr><td colspan="6" class="mono">загрузка…</td></tr></tbody>
 </table>
