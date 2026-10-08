@@ -107,57 +107,47 @@ _wg_cookie: str | None = None
 _wg_lock = asyncio.Lock()
 
 
-async def wg_login(client: httpx.AsyncClient) -> str | None:
+async def wg_login() -> str | None:
+    # Fresh client, used only for this one request: reusing a client that
+    # already made an earlier (unauthenticated/failed) request carries that
+    # request's cookie jar along, and wg-easy's session middleware chokes on
+    # the stale/duplicate cookie, breaking the login call itself.
     global _wg_cookie
-    r = await client.post(f"{WG_URL}/api/session", json={"password": WG_PASSWORD})
-    if r.status_code // 100 == 2:
-        cookie = r.cookies.get("connect.sid")
-        if cookie:
-            _wg_cookie = cookie
-            return cookie
+    async with httpx.AsyncClient(timeout=5) as client:
+        r = await client.post(f"{WG_URL}/api/session", json={"password": WG_PASSWORD})
+        if r.status_code // 100 == 2:
+            cookie = r.cookies.get("connect.sid")
+            if cookie:
+                _wg_cookie = cookie
+                return cookie
     return None
+
+
+async def wg_fetch_clients(cookie: str) -> httpx.Response:
+    async with httpx.AsyncClient(timeout=5) as client:
+        return await client.get(
+            f"{WG_URL}/api/wireguard/client", cookies={"connect.sid": cookie}
+        )
 
 
 async def wg_get_clients():
     global _wg_cookie
     async with _wg_lock:
-        async with httpx.AsyncClient(timeout=5) as client:
-            cookies = {"connect.sid": _wg_cookie} if _wg_cookie else {}
-            r = await client.get(f"{WG_URL}/api/wireguard/client", cookies=cookies)
-            # This wg-easy version returns 500 (not 401/403) for an
-            # unauthenticated/expired-session request, so any non-2xx on the
-            # first attempt is treated as "need to (re)login", not just 401/403.
-            if r.status_code // 100 != 2:
-                cookie = await wg_login(client)
-                if not cookie:
-                    return None, "auth_failed"
-                r = await client.get(
-                    f"{WG_URL}/api/wireguard/client",
-                    cookies={"connect.sid": cookie},
-                )
-            if r.status_code // 100 != 2:
-                return None, f"http_{r.status_code}"
-            try:
-                return r.json(), None
-            except Exception:
-                return None, "bad_json"
-
-
-@app.get("/api/wg-debug")
-async def wg_debug():
-    async with httpx.AsyncClient(timeout=5) as client:
-        r = await client.post(f"{WG_URL}/api/session", json={"password": WG_PASSWORD})
-        return {
-            "wg_url": WG_URL,
-            "login_status": r.status_code,
-            "login_body": r.text[:300],
-            "set_cookie_header": r.headers.get("set-cookie"),
-            "raw_cookie_jar": [
-                {"name": c.name, "value": c.value[:20] if c.value else c.value, "domain": c.domain, "path": c.path}
-                for c in r.cookies.jar
-            ],
-            "r_cookies_get": r.cookies.get("connect.sid"),
-        }
+        r = await wg_fetch_clients(_wg_cookie) if _wg_cookie else None
+        # This wg-easy version returns 500 (not 401/403) for an
+        # unauthenticated/expired-session request, so any non-2xx (or no
+        # cached cookie at all) is treated as "need to (re)login".
+        if r is None or r.status_code // 100 != 2:
+            cookie = await wg_login()
+            if not cookie:
+                return None, "auth_failed"
+            r = await wg_fetch_clients(cookie)
+        if r.status_code // 100 != 2:
+            return None, f"http_{r.status_code}"
+        try:
+            return r.json(), None
+        except Exception:
+            return None, "bad_json"
 
 
 @app.get("/api/wg")
