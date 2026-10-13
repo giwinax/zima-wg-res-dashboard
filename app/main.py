@@ -182,6 +182,86 @@ def _is_recent(iso_ts: str, window_sec: int = 150) -> bool:
         return False
 
 
+# ---------------- openflux logs ----------------
+# Read straight from Docker's json-file log of the openflux container
+# (host /var/lib/docker/containers bind-mounted read-only). No Docker socket:
+# the dashboard cannot control containers, only read this one log file.
+# The container id changes on every recreate, so it is resolved by name.
+
+import json
+import re
+
+DOCKER_CONTAINERS_DIR = Path(os.environ.get("DOCKER_CONTAINERS_DIR", "/host/docker-containers"))
+OPENFLUX_CONTAINER = os.environ.get("OPENFLUX_CONTAINER", "openflux")
+LOG_TAIL_BYTES = 256 * 1024
+
+_NOISE = re.compile(r"STATS\]|CUPS-TOTAL\]|\[CH-\d+|\[STRIPE\]|^! |Kernel RSTs|--local-ip|tcp-flags RST")
+_QR = re.compile(r"[\u2580-\u259f]{4,}")
+_SECRET = re.compile(r"openflux://\S+")
+_TS = re.compile(r"^\d{4}/\d{2}/\d{2} (\d{2}:\d{2}:\d{2})(\.\d+)? ")
+
+_log_path_cache: tuple[float, Path | None] = (0.0, None)
+
+
+def _find_log_path() -> Path | None:
+    global _log_path_cache
+    ts, cached = _log_path_cache
+    if cached is not None and cached.exists() and time.time() - ts < 30:
+        return cached
+    found = None
+    if DOCKER_CONTAINERS_DIR.exists():
+        for d in DOCKER_CONTAINERS_DIR.iterdir():
+            cfg = d / "config.v2.json"
+            try:
+                meta = json.loads(cfg.read_text())
+            except Exception:
+                continue
+            if meta.get("Name") == "/" + OPENFLUX_CONTAINER:
+                p = d / f"{d.name}-json.log"
+                if p.exists() and (found is None or p.stat().st_mtime > found.stat().st_mtime):
+                    found = p
+    _log_path_cache = (time.time(), found)
+    return found
+
+
+def _tail_lines(path: Path, max_bytes: int) -> list[str]:
+    size = path.stat().st_size
+    with path.open("rb") as f:
+        f.seek(max(0, size - max_bytes))
+        data = f.read()
+    lines = data.splitlines()
+    if size > max_bytes and lines:
+        lines = lines[1:]  # first line is probably cut in half
+    return [l.decode("utf-8", "replace") for l in lines]
+
+
+@app.get("/api/openflux/logs")
+def openflux_logs(lines: int = 200, noise: bool = False):
+    lines = max(10, min(lines, 1000))
+    path = _find_log_path()
+    if path is None:
+        return JSONResponse({"error": "log_not_found", "container": OPENFLUX_CONTAINER}, status_code=404)
+    out = []
+    for raw in _tail_lines(path, LOG_TAIL_BYTES):
+        try:
+            rec = json.loads(raw)
+        except Exception:
+            continue
+        msg = rec.get("log", "").rstrip("\n")
+        if not msg.strip() or _QR.search(msg):
+            continue
+        m = _TS.match(msg)
+        if m:
+            msg = msg[m.end():]
+        if not noise and _NOISE.search(msg):
+            continue
+        msg = _SECRET.sub("openflux://<hidden>", msg)
+        out.append({"t": rec.get("time"), "s": rec.get("stream"), "m": msg[:1000]})
+    out = out[-lines:]
+    st = path.stat()
+    return {"container": OPENFLUX_CONTAINER, "lines": out, "updated": st.st_mtime}
+
+
 # ---------------- static frontend ----------------
 # No default Cache-Control -> browsers use heuristic caching and can keep
 # serving a stale index.html/app.js for a long time after a deploy, with no

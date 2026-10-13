@@ -7,10 +7,13 @@ services:
     volumes:
       - /proc:/host/proc:ro
       - /sys:/host/sys:ro
+      # openflux logs: Docker json-file logs, read-only, no Docker socket
+      - /var/lib/docker/containers:/host/docker-containers:ro
     environment:
       - HOST_PROC=/host/proc
       - HOST_SYS=/host/sys
       - NET_IFACE=eth0
       - WG_EASY_URL=http://192.168.8.128:51821
       - WG_EASY_PASSWORD=changeme
+      - OPENFLUX_CONTAINER=openflux
     restart: unless-stopped

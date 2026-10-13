@@ -170,6 +170,67 @@ async function pollWg() {
   }
 }
 
+// OpenFlux: хвост docker-лога контейнера openflux. Строки ставятся через
+// textContent, не innerHTML: это внешние данные.
+const OF_POLL_MS = 3000;
+let ofLastKey = "";
+
+function ofClass(m) {
+  if (/fail|error|ошибк|refus|denied|timed out|не отвечают/i.test(m)) return "err";
+  if (/warn|retry|reconnect|still not up|switched|took over/i.test(m)) return "warn";
+  if (/started|established|auth OK|зашли в|Running as EXIT/i.test(m)) return "ok";
+  return "";
+}
+
+async function pollOpenflux() {
+  const box = document.getElementById("of-logs");
+  const status = document.getElementById("of-status");
+  const noise = document.getElementById("of-noise").checked;
+  try {
+    const r = await fetch("/api/openflux/logs?lines=300&noise=" + noise);
+    const d = await r.json();
+    if (!r.ok) {
+      status.textContent = "· лог не найден (" + (d.container || "openflux") + ")";
+      return;
+    }
+    const last = d.lines.length ? d.lines[d.lines.length - 1] : null;
+    const key = noise + "|" + d.lines.length + "|" + (last ? last.t : "");
+    status.textContent = "· " + d.lines.length + " строк";
+    if (key === ofLastKey) return;
+    ofLastKey = key;
+    const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
+    const frag = document.createDocumentFragment();
+    if (!d.lines.length) {
+      const s = document.createElement("span");
+      s.className = "ln ts";
+      s.textContent = "пусто";
+      frag.appendChild(s);
+    }
+    for (const l of d.lines) {
+      const row = document.createElement("span");
+      row.className = "ln " + ofClass(l.m);
+      const ts = document.createElement("span");
+      ts.className = "ts";
+      ts.textContent = l.t ? new Date(l.t).toLocaleTimeString("ru-RU") : "";
+      row.appendChild(ts);
+      row.appendChild(document.createTextNode(l.m));
+      frag.appendChild(row);
+    }
+    box.replaceChildren(frag);
+    if (atBottom) box.scrollTop = box.scrollHeight;
+  } catch (e) {
+    status.textContent = "· ошибка API";
+  }
+}
+
+document.getElementById("of-noise").addEventListener("change", () => {
+  ofLastKey = "";
+  pollOpenflux().then(() => {
+    const box = document.getElementById("of-logs");
+    box.scrollTop = box.scrollHeight;
+  });
+});
+
 function tick() {
   pollSystem();
   pollWg();
@@ -191,3 +252,8 @@ document.querySelectorAll("th.sortable").forEach(th => {
 
 tick();
 setInterval(tick, POLL_MS);
+pollOpenflux().then(() => {
+  const box = document.getElementById("of-logs");
+  box.scrollTop = box.scrollHeight;
+});
+setInterval(pollOpenflux, OF_POLL_MS);

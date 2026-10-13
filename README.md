@@ -31,3 +31,18 @@ docker compose up -d --build
 ## Безопасность
 
 Дашборд сам без авторизации (LAN-only расчёт). Если нужно — повесить перед ним Cloudflared/Caddy с basic-auth, благо на ZimaOS уже стоит Cloudflared.
+
+## OpenFlux логи
+
+Внизу дашборда - хвост лога контейнера `openflux` (обновление раз в 3 с, статистика скрыта по умолчанию, ссылки `openflux://` с ключом вырезаются).
+
+Читается напрямую json-file лог Docker, без docker.sock:
+
+```yaml
+volumes:
+  - /var/lib/docker/containers:/host/docker-containers:ro
+environment:
+  - OPENFLUX_CONTAINER=openflux   # имя контейнера
+```
+
+Контейнер находится по имени (id меняется при пересоздании). API: `GET /api/openflux/logs?lines=200&noise=false`.
